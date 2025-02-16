@@ -1,0 +1,65 @@
+*&---------------------------------------------------------------------*
+*& Report ZPG_EP2_INVUPLOAD
+*&---------------------------------------------------------------------*
+*&    Program name  : ZPG_EP2_INVUPLOAD
+*&    Function Code : EP2_PAY002
+*&    Report Name   : Upload Invoice File and Link
+*&    Copied from   :
+*&=====================================================================*
+*&            V  E  R  S  I  O  N       D  E  T  A  I  L  S
+*&=====================================================================*
+*& Version| Created by | Date time           | Description
+*&=====================================================================*
+*& 0.01   | MinhDV    | 05.07.2024 12:00:59 | Create new program
+*&        |            |                     |
+*&---------------------------------------------------------------------*
+
+INCLUDE zin_ep2_invupload_top                   .    " Global Data
+
+* INCLUDE ZIN_EP2_INVUPLOAD_O01                   .  " PBO-Modules
+* INCLUDE ZIN_EP2_INVUPLOAD_I01                   .  " PAI-Modules
+INCLUDE zin_ep2_invupload_f01                   .  " FORM-Routines
+
+
+*---------------------------------------------------------------------*
+*       I N I T I A L I Z A T I O N
+*---------------------------------------------------------------------*
+INITIALIZATION.
+  PERFORM initialization.
+*---------------------------------------------------------------------*
+*       S E L E C T I O N -  S C R E E N
+*---------------------------------------------------------------------*
+AT SELECTION-SCREEN.
+* Check Authority
+  PERFORM check_author.
+
+* Set function when click an button on screen
+  PERFORM selection_screen_set_function.
+
+AT SELECTION-SCREEN OUTPUT.
+* Modify Screen
+  PERFORM screen_output.
+
+*---------------------------------------------------------------------*
+*       S E A R C H   H E L P                                         *
+*---------------------------------------------------------------------*
+AT SELECTION-SCREEN ON VALUE-REQUEST FOR pa_path.
+  PERFORM get_path.
+
+*---------------------------------------------------------------------*
+*       S T A R T - O F - S E L E C T I O N
+*---------------------------------------------------------------------*
+START-OF-SELECTION.
+  CASE gv_function.
+    WHEN gc_function_down.
+      PERFORM download_temp USING gc_file_temp.
+    WHEN OTHERS.
+* Get Parameter
+      PERFORM get_parameter.
+* Get data
+      PERFORM get_data.
+* Process data
+      PERFORM process_data.
+* Display data
+      PERFORM display_data.
+  ENDCASE.

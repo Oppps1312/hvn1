@@ -1,0 +1,753 @@
+*&---------------------------------------------------------------------*
+*& Include          ZIN_EP2_INVUPLOAD_F01
+*&---------------------------------------------------------------------*
+****************************************************************
+* LOCAL CLASSES: Definition
+****************************************************************
+CLASS gcl_event_receiver DEFINITION  ##CLASS_FINAL.
+
+  PUBLIC SECTION.
+    METHODS:
+      on_user_command FOR EVENT added_function OF cl_salv_events
+        IMPORTING e_salv_function.
+
+
+ENDCLASS.
+****************************************************************
+* LOCAL CLASSES: Implementation
+****************************************************************
+CLASS gcl_event_receiver IMPLEMENTATION.
+  METHOD on_user_command.
+    CASE e_salv_function.
+      WHEN 'SAVE'.
+        PERFORM save_data.
+    ENDCASE.
+
+  ENDMETHOD.
+ENDCLASS.
+*&---------------------------------------------------------------------*
+*&      Form  INITIALIZATION
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+*  -->  p1        text
+*  <--  p2        text
+*----------------------------------------------------------------------*
+FORM initialization .
+  "Set name of 2 functions
+  sscrfields-functxt_01 = |{ icon_xls } { TEXT-f01 }|.
+ENDFORM.
+*&---------------------------------------------------------------------*
+*&      Form  CHECK_AUTHOR
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+*  -->  p1        text
+*  <--  p2        text
+*----------------------------------------------------------------------*
+FORM check_author .
+
+ENDFORM.
+*&---------------------------------------------------------------------*
+*&      Form  SCREEN_OUTPUT
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+*  -->  p1        text
+*  <--  p2        text
+*----------------------------------------------------------------------*
+FORM screen_output .
+
+ENDFORM.
+*&---------------------------------------------------------------------*
+*&      Form  GET_PARAMETER
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+*  -->  p1        text
+*  <--  p2        text
+*----------------------------------------------------------------------*
+FORM get_parameter .
+  IF pa_path IS INITIAL.
+    MESSAGE '"File path" is required!' TYPE 'S' DISPLAY LIKE 'E'.
+    LEAVE LIST-PROCESSING.
+  ENDIF.
+ENDFORM.
+*&---------------------------------------------------------------------*
+*&      Form  GET_DATA
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+*  -->  p1        text
+*  <--  p2        text
+*----------------------------------------------------------------------*
+FORM get_data .
+  FIELD-SYMBOLS <lt_data> TYPE ANY TABLE.
+
+  "Check exsiting input file
+  PERFORM check_path.
+
+  ASSIGN gt_input[] TO <lt_data>.
+
+  CALL METHOD cl_gui_frontend_services=>gui_upload
+    EXPORTING
+      filename                = pa_path
+      filetype                = 'ASC'
+      has_field_separator     = '#'
+      read_by_line            = 'X'
+*     dat_mode                = 'X'
+      replacement             = ' '
+      codepage                = '4110' "UTF8
+    CHANGING
+      data_tab                = <lt_data>
+    EXCEPTIONS
+      file_open_error         = 1
+      file_read_error         = 2
+      no_batch                = 3
+      gui_refuse_filetransfer = 4
+      invalid_type            = 5
+      no_authority            = 6
+      unknown_error           = 7
+      bad_data_format         = 8
+      header_not_allowed      = 9
+      separator_not_allowed   = 10
+      header_too_long         = 11
+      unknown_dp_error        = 12
+      access_denied           = 13
+      dp_out_of_memory        = 14
+      disk_full               = 15
+      dp_timeout              = 16
+      not_supported_by_gui    = 17
+      error_no_gui            = 18
+      OTHERS                  = 19.
+
+  IF sy-subrc NE 0.
+    MESSAGE i000(0k) WITH 'Uploading Error => ' sy-subrc.
+    LEAVE LIST-PROCESSING.
+  ENDIF.
+*[ADD:S] LUNGTV_6.12.2024 9:10:42
+  DELETE gt_input INDEX 1.
+*[ADD:E] LUNGTV_6.12.2024 9:10:42
+*[DEL:S] LUNGTV_6.12.2024 9:10:42
+*  IF <lt_data> IS INITIAL.
+*[DEL:E] LUNGTV_6.12.2024 9:10:42
+*[ADD:S] LUNGTV_6.12.2024 9:10:42
+  IF lines( gt_input  ) = 0.
+*[ADD:S] LUNGTV_6.12.2024 9:10:42
+    MESSAGE 'The file is empty' TYPE 'S' DISPLAY LIKE 'E'.
+    LEAVE LIST-PROCESSING.
+  ENDIF.
+
+ENDFORM.
+*&---------------------------------------------------------------------*
+*&      Form  PROCESS_DATA
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+*  -->  p1        text
+*  <--  p2        text
+*----------------------------------------------------------------------*
+FORM process_data .
+  LOOP AT gt_input INTO DATA(ls_input).
+    APPEND INITIAL LINE TO gt_data ASSIGNING FIELD-SYMBOL(<lf_s_data>).
+
+    <lf_s_data>-row_index       = sy-tabix.
+    <lf_s_data>-message         = ''.
+    <lf_s_data>-status          = gc_status_normal.
+    <lf_s_data>-invoice_no      = ls_input-invoice_no.
+    <lf_s_data>-gjahr           = ls_input-gjahr.
+    SELECT SINGLE gjahr, lifnr
+      FROM rbkp
+      INTO ( @<lf_s_data>-gjahr, @<lf_s_data>-lifnr )
+      WHERE belnr = @<lf_s_data>-invoice_no
+        AND gjahr = @<lf_s_data>-gjahr.
+    IF sy-subrc <> 0.
+      <lf_s_data>-message       = |[E] Invoice { <lf_s_data>-invoice_no } not found|.
+      <lf_s_data>-status        = gc_status_error.
+    ENDIF.
+
+    <lf_s_data>-tax_reference   = ls_input-reference.
+    <lf_s_data>-tax_mahq        = ls_input-tax_mahq.
+    <lf_s_data>-tax_ngaydangky  = ls_input-tax_ngaydangky.
+    <lf_s_data>-tax_sohoadon    = ls_input-tax_sohoadon.
+    <lf_s_data>-tax_amount_n    = ls_input-tax_n.
+    <lf_s_data>-tax_amount_v    = ls_input-tax_v.
+    <lf_s_data>-tax_amount_t    = ls_input-tax_t.
+    <lf_s_data>-tax_amount_o    = ls_input-tax_o.
+    <lf_s_data>-einv_link       = ls_input-einv_link.
+    <lf_s_data>-einv_code       = ls_input-einv_code.
+    <lf_s_data>-einv_account    = ls_input-einv_account.
+    <lf_s_data>-einv_pass       = ls_input-einv_pass.
+    <lf_s_data>-einv_symbol     = ls_input-einv_symbol.
+    <lf_s_data>-einv_number     = ls_input-einv_number.
+    <lf_s_data>-url             = ls_input-url.
+
+    SELECT SINGLE taxtype
+      FROM ztb_ep2_lifnr_hq
+      INTO @<lf_s_data>-taxtype
+      WHERE lifnr = @<lf_s_data>-lifnr.
+  ENDLOOP.
+
+
+ENDFORM.
+*&---------------------------------------------------------------------*
+*&      Form  DISPLAY_DATA
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+*  -->  p1        text
+*  <--  p2        text
+*----------------------------------------------------------------------*
+FORM display_data .
+  DATA: ls_color       TYPE lvc_s_colo,
+        lo_column      TYPE REF TO cl_salv_column_table,
+        lo_events      TYPE REF TO gcl_event_receiver,
+        go_salv_events TYPE REF TO cl_salv_events_table.
+  FIELD-SYMBOLS: <lf_table> TYPE ANY TABLE.
+  ASSIGN gt_data TO <lf_table>.
+  TRY.
+      cl_salv_table=>factory(
+        IMPORTING
+          r_salv_table = go_salv
+        CHANGING
+          t_table      = <lf_table> ).
+
+      DEFINE set_colname.
+        go_salv->get_columns( )->get_column( &1 )->set_short_text( CONV #( &2 ) ).
+        go_salv->get_columns( )->get_column( &1 )->set_medium_text( CONV #( &2 ) ).
+        go_salv->get_columns( )->get_column( &1 )->set_long_text( CONV #( &2 ) ).
+      END-OF-DEFINITION.
+
+      set_colname 'STATUS'              'Status'.
+      set_colname 'ROW_INDEX'           'Row'.
+      set_colname 'MESSAGE'             'Message'.
+      set_colname 'INVOICE_NO'          'Invoice No'.
+      set_colname 'GJAHR'               'Fiscal Year'.
+      set_colname 'TAX_REFERENCE'       'Tax Reference'.
+      set_colname 'TAX_MAHQ'            'Mã HQ'.
+      set_colname 'TAX_NGAYDANGKY'      'Ngày đăng ký'.
+      set_colname 'TAX_SOHOADON'        'Số hóa đơn'.
+      set_colname 'TAX_AMOUNT_N'        'N Thuế NK'.
+      set_colname 'TAX_AMOUNT_V'        'V Thuế VAT'.
+      set_colname 'TAX_AMOUNT_T'        'T Thuế TTDB'.
+      set_colname 'TAX_AMOUNT_O'        'O Thuế khác'.
+      set_colname 'EINV_LINK'           'EIV Link'.
+      set_colname 'EINV_CODE'           'EIV Searching Code'.
+      set_colname 'EINV_ACCOUNT'        'EIV Account'.
+      set_colname 'EINV_PASS'           'EIV Password'.
+      set_colname 'EINV_SYMBOL'         'EIV Symnol'.
+      set_colname 'EINV_NUMBER'         'EIV Number'.
+      set_colname 'URL'                 'URL'.
+
+      go_salv->get_columns( )->get_column( 'STATUS'          )->set_output_length( 5 ).
+      go_salv->get_columns( )->get_column( 'ROW_INDEX'       )->set_output_length( 5 ).
+      go_salv->get_columns( )->get_column( 'MESSAGE'         )->set_output_length( 30 ).
+      go_salv->get_columns( )->get_column( 'INVOICE_NO'      )->set_output_length( 10 ).
+      go_salv->get_columns( )->get_column( 'GJAHR'           )->set_output_length( 5 ).
+      go_salv->get_columns( )->get_column( 'TAX_REFERENCE'   )->set_output_length( 10 ).
+      go_salv->get_columns( )->get_column( 'TAX_MAHQ'        )->set_output_length( 10 ).
+      go_salv->get_columns( )->get_column( 'TAX_NGAYDANGKY'  )->set_output_length( 10 ).
+      go_salv->get_columns( )->get_column( 'TAX_SOHOADON'    )->set_output_length( 10 ).
+      go_salv->get_columns( )->get_column( 'TAX_AMOUNT_N'    )->set_output_length( 10 ).
+      go_salv->get_columns( )->get_column( 'TAX_AMOUNT_V'    )->set_output_length( 10 ).
+      go_salv->get_columns( )->get_column( 'TAX_AMOUNT_T'    )->set_output_length( 10 ).
+      go_salv->get_columns( )->get_column( 'TAX_AMOUNT_O'    )->set_output_length( 10 ).
+      go_salv->get_columns( )->get_column( 'EINV_LINK'       )->set_output_length( 20 ).
+      go_salv->get_columns( )->get_column( 'EINV_CODE'       )->set_output_length( 10 ).
+      go_salv->get_columns( )->get_column( 'EINV_ACCOUNT'    )->set_output_length( 10 ).
+      go_salv->get_columns( )->get_column( 'EINV_PASS'       )->set_output_length( 10 ).
+      go_salv->get_columns( )->get_column( 'EINV_SYMBOL'     )->set_output_length( 10 ).
+      go_salv->get_columns( )->get_column( 'EINV_NUMBER'     )->set_output_length( 10 ).
+      go_salv->get_columns( )->get_column( 'URL'             )->set_output_length( 10 ).
+
+*[ADD:S] LUNGTV_6.12.2024 9:10:42
+      go_salv->get_display_settings( )->set_list_header( |{ sy-title } (Tax)| ).
+      go_salv->get_display_settings( )->set_list_header( |{ sy-title } (Domestic Invoice)| ).
+      go_salv->get_columns( )->get_column( 'EINV_LINK' )->set_technical( abap_true ).
+      go_salv->get_columns( )->get_column( 'EINV_CODE' )->set_technical( abap_true ).
+      go_salv->get_columns( )->get_column( 'EINV_ACCOUNT' )->set_technical( abap_true ).
+      go_salv->get_columns( )->get_column( 'EINV_PASS' )->set_technical( abap_true ).
+      go_salv->get_columns( )->get_column( 'EINV_SYMBOL' )->set_technical( abap_true ).
+      go_salv->get_columns( )->get_column( 'EINV_NUMBER' )->set_technical( abap_true ).
+*[ADD:E] LUNGTV_6.12.2024 9:10:42
+
+*[DEL:S] LUNGTV_6.12.2024 9:10:42
+*      CASE 'X'.
+*        WHEN p_tax.
+*          go_salv->get_display_settings( )->set_list_header( |{ sy-title } (Tax)| ).
+*          go_salv->get_display_settings( )->set_list_header( |{ sy-title } (Domestic Invoice)| ).
+*          go_salv->get_columns( )->get_column( 'EINV_LINK' )->set_technical( abap_true ).
+*          go_salv->get_columns( )->get_column( 'EINV_CODE' )->set_technical( abap_true ).
+*          go_salv->get_columns( )->get_column( 'EINV_ACCOUNT' )->set_technical( abap_true ).
+*          go_salv->get_columns( )->get_column( 'EINV_PASS' )->set_technical( abap_true ).
+*          go_salv->get_columns( )->get_column( 'EINV_SYMBOL' )->set_technical( abap_true ).
+*          go_salv->get_columns( )->get_column( 'EINV_NUMBER' )->set_technical( abap_true ).
+*        WHEN p_einv.
+*          go_salv->get_columns( )->get_column( 'TAX_REFERENCE' )->set_technical( abap_true ).
+*          go_salv->get_columns( )->get_column( 'TAX_MAHQ'     )->set_technical( abap_true ).
+*          go_salv->get_columns( )->get_column( 'TAX_AMOUNT_N' )->set_technical( abap_true ).
+*          go_salv->get_columns( )->get_column( 'TAX_AMOUNT_V' )->set_technical( abap_true ).
+*          go_salv->get_columns( )->get_column( 'TAX_AMOUNT_T' )->set_technical( abap_true ).
+*          go_salv->get_columns( )->get_column( 'TAX_AMOUNT_O' )->set_technical( abap_true ).
+*        WHEN p_inv.
+*
+*          go_salv->get_display_settings( )->set_list_header( |{ sy-title } (Tax)| ).
+*          go_salv->get_display_settings( )->set_list_header( |{ sy-title } (Domestic Invoice)| ).
+*          go_salv->get_columns( )->get_column( 'EINV_LINK' )->set_technical( abap_true ).
+*          go_salv->get_columns( )->get_column( 'EINV_CODE' )->set_technical( abap_true ).
+*          go_salv->get_columns( )->get_column( 'EINV_ACCOUNT' )->set_technical( abap_true ).
+*          go_salv->get_columns( )->get_column( 'EINV_PASS' )->set_technical( abap_true ).
+*          go_salv->get_columns( )->get_column( 'EINV_SYMBOL' )->set_technical( abap_true ).
+*          go_salv->get_columns( )->get_column( 'EINV_NUMBER' )->set_technical( abap_true ).
+*
+*          go_salv->get_columns( )->get_column( 'TAX_REFERENCE' )->set_technical( abap_true ).
+*          go_salv->get_columns( )->get_column( 'TAX_MAHQ'     )->set_technical( abap_true ).
+*          go_salv->get_columns( )->get_column( 'TAX_AMOUNT_N' )->set_technical( abap_true ).
+*          go_salv->get_columns( )->get_column( 'TAX_AMOUNT_V' )->set_technical( abap_true ).
+*          go_salv->get_columns( )->get_column( 'TAX_AMOUNT_T' )->set_technical( abap_true ).
+*          go_salv->get_columns( )->get_column( 'TAX_AMOUNT_O' )->set_technical( abap_true ).
+*        WHEN OTHERS.
+*      ENDCASE.
+*[DEL:E] LUNGTV_6.12.2024 9:10:42
+
+      go_salv->get_columns( )->get_column( 'LIFNR' )->set_technical( abap_true ).
+      go_salv->get_columns( )->get_column( 'TAXTYPE' )->set_technical( abap_true ).
+
+
+      lo_column ?= go_salv->get_columns( )->get_column( 'STATUS' ).
+      lo_column->set_key( abap_true ).
+      lo_column ?= go_salv->get_columns( )->get_column( 'ROW_INDEX' ).
+      lo_column->set_key( abap_true ).
+      lo_column ?= go_salv->get_columns( )->get_column( 'INVOICE_NO' ).
+      lo_column->set_key( abap_true ).
+      go_salv->get_columns( )->set_key_fixation( abap_true ).
+
+*      go_salv->get_columns( )->get_column( 'TAX_AMOUNT_N' )->set_decimals( '0' ).
+*      go_salv->get_columns( )->get_column( 'TAX_AMOUNT_V' )->set_decimals( '0' ).
+*      go_salv->get_columns( )->get_column( 'TAX_AMOUNT_T' )->set_decimals( '0' ).
+*      go_salv->get_columns( )->get_column( 'TAX_AMOUNT_O' )->set_decimals( '0' ).
+
+      "set color
+      ls_color = VALUE #( col = 4 int = 0 inv = 0 ).
+      lo_column ?= go_salv->get_columns( )->get_column( 'MESSAGE' ).
+      lo_column->set_color( ls_color ).
+
+
+      "handle event
+      go_salv_events = go_salv->get_event( ).
+      CREATE OBJECT lo_events.
+      SET HANDLER lo_events->on_user_command FOR go_salv_events.
+
+      go_salv->set_screen_status(
+        report        = 'ZPG_EP2_INVUPLOAD'
+        pfstatus      = 'STANDARD_FULLSCREEN'
+        set_functions = go_salv->c_functions_all
+      ).
+
+      go_salv->get_functions( )->set_all( abap_true ).
+      go_salv->get_layout( )->set_default( 'X' ).
+      go_salv->get_display_settings( )->set_striped_pattern( cl_salv_display_settings=>true ).
+
+      go_salv->get_layout( )->set_key( VALUE salv_s_layout_key( report = sy-repid ) ).
+      go_salv->get_layout( )->set_save_restriction( if_salv_c_layout=>restrict_none ).
+      go_salv->get_selections( )->set_selection_mode( if_salv_c_selection_mode=>row_column ).
+
+      go_salv->display( ).
+    CATCH cx_salv_data_error.
+    CATCH cx_salv_msg.
+    CATCH cx_salv_not_found.
+  ENDTRY.
+ENDFORM.
+*&---------------------------------------------------------------------*
+*&      Form  SELECTION_SCREEN_SET_FUNCTION
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+*  -->  p1        text
+*  <--  p2        text
+*----------------------------------------------------------------------*
+FORM selection_screen_set_function .
+  CASE sscrfields-ucomm.
+    WHEN 'FC01'. "on click: Download
+      gv_function       = gc_function_down.
+      sscrfields-ucomm  = gc_ucomm_execute.
+    WHEN OTHERS. "on click: Execute(F8)
+      gv_function       = gc_function_display.
+  ENDCASE.
+ENDFORM.
+*&---------------------------------------------------------------------*
+*&      Form  GET_PATH
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+*  -->  p1        text
+*  <--  p2        text
+*----------------------------------------------------------------------*
+FORM get_path .
+  DATA: lt_file         TYPE filetable, "Table Holding Selected Files
+        lv_rc           TYPE i,
+        lv_desktop_path TYPE  string
+        .
+  CALL METHOD cl_gui_frontend_services=>get_desktop_directory
+    CHANGING
+      desktop_directory = lv_desktop_path
+    EXCEPTIONS
+      cntl_error        = 1.
+  IF  sy-subrc = 0.
+    CALL METHOD cl_gui_cfw=>update_view.
+  ENDIF.
+
+  "open file
+  CALL METHOD cl_gui_frontend_services=>file_open_dialog
+    EXPORTING
+      file_filter             = 'Text (*.TXT)|*.TXT|' ##NO_TEXT
+      initial_directory       = lv_desktop_path
+    CHANGING
+      file_table              = lt_file
+      rc                      = lv_rc
+    EXCEPTIONS
+      file_open_dialog_failed = 1
+      cntl_error              = 2
+      error_no_gui            = 3
+      not_supported_by_gui    = 4
+      OTHERS                  = 5.
+  IF sy-subrc <> 0.
+    MESSAGE ID sy-msgid
+      TYPE sy-msgty
+      NUMBER sy-msgno
+      WITH sy-msgv1 sy-msgv2 sy-msgv3 sy-msgv4.
+    RETURN.
+  ENDIF.
+  IF lv_rc = 0.
+    RETURN.
+  ENDIF.
+  IF lt_file[] IS INITIAL.
+    MESSAGE 'Input file first' TYPE 'S' DISPLAY LIKE 'E'  ##NO_TEXT.
+    LEAVE LIST-PROCESSING.
+  ENDIF.
+
+  pa_path = CONV string( lt_file[ 1 ]-filename ).
+ENDFORM.
+*&---------------------------------------------------------------------*
+*&      Form  DOWNLOAD_TEMP
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+*  -->  p1        text
+*  <--  p2        text
+*----------------------------------------------------------------------*
+FORM download_temp USING plv_temp_source TYPE tadir-obj_name.
+  DATA: lv_stripped_name TYPE string,
+        lv_path          TYPE string,
+        lv_fullpath      TYPE string,
+        lv_action        TYPE i,
+        lv_temp_existed  TYPE btch0000-char1,
+        lv_desktop_path  TYPE  string.
+
+  "Get destop directory
+  CALL METHOD cl_gui_frontend_services=>get_desktop_directory
+    CHANGING
+      desktop_directory = lv_desktop_path
+    EXCEPTIONS
+      cntl_error        = 1.
+  IF  sy-subrc = 0.
+    CALL METHOD cl_gui_cfw=>update_view.
+  ENDIF.
+
+  "Open Save dialog
+  CALL METHOD cl_gui_frontend_services=>file_save_dialog
+    EXPORTING
+      window_title              = 'Download Template' ##NO_TEXT
+      file_filter               = 'Excel Macro(*.XLSM)|*.XLSM'
+      default_extension         = 'XLSM'
+      initial_directory         = lv_desktop_path
+    CHANGING
+      filename                  = lv_stripped_name
+      path                      = lv_path
+      fullpath                  = lv_fullpath
+      user_action               = lv_action
+    EXCEPTIONS
+      cntl_error                = 1
+      error_no_gui              = 2
+      not_supported_by_gui      = 3
+      invalid_default_file_name = 4
+      OTHERS                    = 5.
+  IF sy-subrc <> 0.
+    MESSAGE ID sy-msgid
+      TYPE 'S'
+      NUMBER sy-msgno
+      WITH sy-msgv1 sy-msgv2 sy-msgv3 sy-msgv4
+      DISPLAY LIKE sy-msgty.
+    LEAVE LIST-PROCESSING.
+  ENDIF.
+
+  "Cancel
+  IF lv_action <> 0.
+    RETURN.
+  ENDIF.
+
+  IF strlen( lv_fullpath ) > 128.
+    MESSAGE |File path "{ lv_fullpath }" is too long. Please choose another (path length < 128)!| TYPE 'S' DISPLAY LIKE 'E'.
+    LEAVE LIST-PROCESSING.
+  ENDIF.
+
+  DATA: ls_wwwdata_tab TYPE wwwdatatab,
+        lv_destination TYPE localfile.
+  lv_destination = lv_fullpath.
+
+*Make sure template exists in SMw0 as binary object
+  SELECT SINGLE *
+    FROM wwwdata
+    INNER JOIN tadir
+            ON wwwdata~objid = tadir~obj_name
+    INTO CORRESPONDING FIELDS OF ls_wwwdata_tab
+    WHERE wwwdata~srtf2  = 0
+      AND wwwdata~relid  = 'MI'
+      AND tadir~pgmid    = 'R3TR'
+      AND tadir~object   = 'W3MI'
+      AND tadir~obj_name = plv_temp_source.
+  IF sy-subrc <> 0.
+    MESSAGE ID 'OO' TYPE 'S' NUMBER '000' DISPLAY LIKE 'E'
+      WITH 'Template' plv_temp_source 'does not exist in transaction SMW0'.
+    LEAVE LIST-PROCESSING.
+  ENDIF.
+
+  CALL FUNCTION 'DOWNLOAD_WEB_OBJECT'
+    EXPORTING
+      key         = ls_wwwdata_tab
+      destination = lv_destination.
+
+ENDFORM.
+*&---------------------------------------------------------------------*
+*&      Form  CHECK_PATH
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+*  -->  p1        text
+*  <--  p2        text
+*----------------------------------------------------------------------*
+FORM check_path .
+  DATA: lv_result TYPE c,
+        lv_path   TYPE string.
+  lv_path = pa_path.
+  "Check opening file
+  CALL METHOD cl_gui_frontend_services=>file_exist
+    EXPORTING
+      file                 = lv_path
+    RECEIVING
+      result               = lv_result
+    EXCEPTIONS
+      cntl_error           = 1
+      error_no_gui         = 2
+      wrong_parameter      = 3
+      not_supported_by_gui = 4
+      OTHERS               = 5.
+  IF sy-subrc <> 0 OR lv_result IS INITIAL.
+    MESSAGE |The file { pa_path } does not exist| TYPE 'S' DISPLAY LIKE 'E'.
+    LEAVE LIST-PROCESSING.
+  ENDIF.
+ENDFORM.
+*&---------------------------------------------------------------------*
+*& Form save_data
+*&---------------------------------------------------------------------*
+*& text
+*&---------------------------------------------------------------------*
+*& -->  p1        text
+*& <--  p2        text
+*&---------------------------------------------------------------------*
+FORM save_data .
+  DATA: lt_ztb_ep2_invorc TYPE TABLE OF ztb_ep2_invorc,
+        lt_rbkp           TYPE TABLE OF rbkp,
+        lv_message        TYPE string,
+        lv_status         LIKE gc_status_normal,
+        ls_stable	        TYPE lvc_s_stbl,
+        BEGIN OF lt_att OCCURS 0,
+          type     TYPE swo_objtyp,
+          object   TYPE swo_typeid,
+          filepath TYPE localfile,
+          title    TYPE so_obj_des,
+        END OF lt_att.
+*[DEL:S] LUNGTV_6.12.2024 9:10:42
+*  LOOP AT gt_data ASSIGNING FIELD-SYMBOL(<lf_s_data>) WHERE status <> gc_status_error.
+*    IF p_tax = 'X'.
+*      APPEND INITIAL LINE TO lt_ztb_ep2_invorc  ASSIGNING FIELD-SYMBOL(<lf_s_ztb_ep2_invorc>).
+*      <lf_s_ztb_ep2_invorc>-belnr       = <lf_s_data>-invoice_no.
+*      <lf_s_ztb_ep2_invorc>-gjahr       = <lf_s_data>-gjahr.
+*      <lf_s_ztb_ep2_invorc>-tax_xblnr   = <lf_s_data>-tax_reference.
+**    <lf_s_ztb_ep2_invorc>-TAX_DAT     = <lf_s_data>-TAX_DAT
+*      CASE <lf_s_data>-taxtype.
+*        WHEN 'N'.
+*          <lf_s_ztb_ep2_invorc>-tax_rmwwr   = <lf_s_data>-tax_amount_n.
+*        WHEN 'V'.
+*          <lf_s_ztb_ep2_invorc>-tax_rmwwr   = <lf_s_data>-tax_amount_v.
+*        WHEN 'T'.
+*          <lf_s_ztb_ep2_invorc>-tax_rmwwr   = <lf_s_data>-tax_amount_t.
+*        WHEN 'O'.
+*          <lf_s_ztb_ep2_invorc>-tax_rmwwr   = <lf_s_data>-tax_amount_o.
+*      ENDCASE.
+*      <lf_s_ztb_ep2_invorc>-tax_n       = <lf_s_data>-tax_amount_n.
+*      <lf_s_ztb_ep2_invorc>-tax_v       = <lf_s_data>-tax_amount_v.
+*      <lf_s_ztb_ep2_invorc>-tax_t       = <lf_s_data>-tax_amount_t.
+*      <lf_s_ztb_ep2_invorc>-tax_o       = <lf_s_data>-tax_amount_o.
+*      <lf_s_ztb_ep2_invorc>-tax_mahq    = <lf_s_data>-tax_mahq.
+*
+*
+*      IF <lf_s_data>-url IS NOT INITIAL.
+*        APPEND INITIAL LINE TO lt_att ASSIGNING FIELD-SYMBOL(<ls_att>).
+*        <ls_att>-type     = 'BUS2081'.
+*        <ls_att>-object   = <lf_s_data>-invoice_no && <lf_s_data>-gjahr.
+*        <ls_att>-filepath = <lf_s_data>-url.
+*      ENDIF.
+*    ENDIF.
+*
+*    IF p_einv = 'X'.
+*      APPEND INITIAL LINE TO lt_rbkp  ASSIGNING FIELD-SYMBOL(<lf_s_rbkp>).
+*      <lf_s_rbkp>-belnr             = <lf_s_data>-invoice_no.
+*      <lf_s_rbkp>-gjahr             = <lf_s_data>-gjahr.
+*      <lf_s_rbkp>-zzeinvlink        = <lf_s_data>-einv_link.
+*      <lf_s_rbkp>-zzeinvsearchcode  = <lf_s_data>-einv_code.
+*      <lf_s_rbkp>-zzeinvaccount     = <lf_s_data>-einv_account.
+*      <lf_s_rbkp>-zzeinvpassword    = <lf_s_data>-einv_pass.
+*      <lf_s_rbkp>-zzeinvsymbol      = <lf_s_data>-einv_symbol.
+*      <lf_s_rbkp>-zzeinvnumber      = <lf_s_data>-einv_number.
+*    ENDIF.
+*  ENDLOOP.
+*  IF lt_ztb_ep2_invorc IS NOT INITIAL.
+*    MODIFY ztb_ep2_invorc FROM TABLE lt_ztb_ep2_invorc.
+*  ENDIF.
+*
+*  IF lt_rbkp IS NOT INITIAL.
+*    LOOP AT lt_rbkp ASSIGNING <lf_s_rbkp>.
+*      UPDATE rbkp
+*        SET zzeinvlink        = <lf_s_rbkp>-zzeinvlink
+*            zzeinvsearchcode  = <lf_s_rbkp>-zzeinvsearchcode
+*            zzeinvaccount     = <lf_s_rbkp>-zzeinvaccount
+*            zzeinvpassword    = <lf_s_rbkp>-zzeinvpassword
+*            zzeinvsymbol      = <lf_s_rbkp>-zzeinvsymbol
+*            zzeinvnumber      = <lf_s_rbkp>-zzeinvnumber
+*        WHERE belnr = <lf_s_rbkp>-belnr
+*          AND gjahr = <lf_s_rbkp>-gjahr.
+*    ENDLOOP.
+*  ENDIF.
+*  IF lt_ztb_ep2_invorc IS NOT INITIAL OR lt_rbkp IS NOT INITIAL.
+*    COMMIT WORK AND WAIT.
+*    lv_message = 'Success'.
+*    lv_status  = gc_status_success.
+*
+*    LOOP AT lt_att.
+*      CALL METHOD zcl_ep2_common=>add_attachment_to_object
+*        EXPORTING
+*          iv_type        = lt_att-type
+*          iv_object      = lt_att-object
+*          iv_filepath    = lt_att-filepath
+*          iv_title       = lt_att-title
+*        EXCEPTIONS
+*          file_not_found = 1
+*          OTHERS         = 2.
+*    ENDLOOP.
+*
+*  ELSE.
+*    ROLLBACK WORK.
+*    lv_message = 'Failed'.
+*    lv_status  = gc_status_error.
+*  ENDIF.
+*  IF p_inv IS INITIAL.
+*    LOOP AT gt_data ASSIGNING <lf_s_data> WHERE status <> gc_status_error.
+*      <lf_s_data>-message = lv_message.
+*      <lf_s_data>-status  = lv_status.
+*    ENDLOOP.
+*  ELSE.
+*    LOOP AT gt_data ASSIGNING <lf_s_data> WHERE status <> gc_status_error.
+*      <lf_s_data>-message = lv_message.
+*      <lf_s_data>-status  = lv_status.
+*
+*      lt_att-type     = 'BUS2081'.
+*      lt_att-object   = <lf_s_data>-invoice_no && <lf_s_data>-gjahr.
+*      lt_att-filepath = <lf_s_data>-url.
+*
+*      CALL METHOD zcl_ep2_common=>add_attachment_to_object
+*        EXPORTING
+*          iv_type        = lt_att-type
+*          iv_object      = lt_att-object
+*          iv_filepath    = lt_att-filepath
+*          iv_title       = lt_att-title
+*        EXCEPTIONS
+*          file_not_found = 1
+*          OTHERS         = 2.
+*      IF sy-subrc = 0.
+*        <lf_s_data>-message = 'Success'.
+*        <lf_s_data>-status  = gc_status_success.
+*      ELSE.
+*        <lf_s_data>-message = 'Failed'.
+*        <lf_s_data>-status  = gc_status_error.
+*      ENDIF.
+*    ENDLOOP.
+*
+*  ENDIF.
+*[DEL:E] LUNGTV_6.12.2024 9:10:42
+*[ADD:S] LUNGTV_6.12.2024 9:10:42
+ LOOP AT gt_data ASSIGNING FIELD-SYMBOL(<lf_s_data>) WHERE status <> gc_status_error.
+
+      APPEND INITIAL LINE TO lt_ztb_ep2_invorc  ASSIGNING FIELD-SYMBOL(<lf_s_ztb_ep2_invorc>).
+      <lf_s_ztb_ep2_invorc>-belnr       = <lf_s_data>-invoice_no.
+      <lf_s_ztb_ep2_invorc>-gjahr       = <lf_s_data>-gjahr.
+      <lf_s_ztb_ep2_invorc>-tax_xblnr   = <lf_s_data>-tax_reference.
+
+      CASE <lf_s_data>-taxtype.
+        WHEN 'N'.
+          <lf_s_ztb_ep2_invorc>-tax_rmwwr   = <lf_s_data>-tax_amount_n.
+        WHEN 'V'.
+          <lf_s_ztb_ep2_invorc>-tax_rmwwr   = <lf_s_data>-tax_amount_v.
+        WHEN 'T'.
+          <lf_s_ztb_ep2_invorc>-tax_rmwwr   = <lf_s_data>-tax_amount_t.
+        WHEN 'O'.
+          <lf_s_ztb_ep2_invorc>-tax_rmwwr   = <lf_s_data>-tax_amount_o.
+      ENDCASE.
+      <lf_s_ztb_ep2_invorc>-tax_n           = <lf_s_data>-tax_amount_n.
+      <lf_s_ztb_ep2_invorc>-tax_v           = <lf_s_data>-tax_amount_v.
+      <lf_s_ztb_ep2_invorc>-tax_t           = <lf_s_data>-tax_amount_t.
+      <lf_s_ztb_ep2_invorc>-tax_o           = <lf_s_data>-tax_amount_o.
+      <lf_s_ztb_ep2_invorc>-tax_mahq        = <lf_s_data>-tax_mahq.
+      <lf_s_ztb_ep2_invorc>-tax_ngaydangky  = <lf_s_data>-tax_ngaydangky.
+      <lf_s_ztb_ep2_invorc>-tax_sohoadon    = <lf_s_data>-tax_sohoadon.
+
+
+      IF <lf_s_data>-url IS NOT INITIAL.
+        APPEND INITIAL LINE TO lt_att ASSIGNING FIELD-SYMBOL(<ls_att>).
+        <ls_att>-type     = 'BUS2081'.
+        <ls_att>-object   = <lf_s_data>-invoice_no && <lf_s_data>-gjahr.
+        <ls_att>-filepath = <lf_s_data>-url.
+      ENDIF.
+
+
+  ENDLOOP.
+  IF lt_ztb_ep2_invorc IS NOT INITIAL.
+    COMMIT WORK AND WAIT.
+    MODIFY ztb_ep2_invorc FROM TABLE lt_ztb_ep2_invorc.
+
+    LOOP AT lt_att.
+      CALL METHOD zcl_ep2_common=>add_attachment_to_object
+        EXPORTING
+          iv_type        = lt_att-type
+          iv_object      = lt_att-object
+          iv_filepath    = lt_att-filepath
+          iv_title       = lt_att-title
+        EXCEPTIONS
+          file_not_found = 1
+          OTHERS         = 2.
+    ENDLOOP.
+    MESSAGE 'Save succcessfully!' TYPE 'S'.
+  ElSE.
+    ROLLBACK WORK.
+    MESSAGE 'Save failed!' TYPE 'E'.
+
+  ENDIF.
+*[ADD:E] LUNGTV_6.12.2024 9:10:42
+
+  ls_stable-row = 'X'.
+  ls_stable-col = 'X'.
+  go_salv->refresh(
+    s_stable = ls_stable
+*   refresh_mode = if_salv_c_refresh=>soft
+  ).
+ENDFORM.
