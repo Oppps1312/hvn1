@@ -1,0 +1,419 @@
+  METHOD send_notify_pay00701.
+
+    TYPES: BEGIN OF lty_receiver,
+             userid TYPE ztb_ep_emp_data-userid,
+             email  TYPE ztb_ep_emp_data-email,
+           END OF lty_receiver.
+
+    DATA: ls_html           TYPE soli,
+          lt_html           TYPE soli_tab,
+          lt_html_head      TYPE soli_tab,
+          lt_html_body_head TYPE soli_tab,
+          lt_html_body_main TYPE soli_tab,
+          lt_html_body_foot TYPE soli_tab,
+          lt_html_foot      TYPE soli_tab,
+          lv_subject        TYPE so_obj_des,
+
+          lo_send_request   TYPE REF TO cl_bcs,
+          lo_document       TYPE REF TO cl_document_bcs,
+          lo_sender         TYPE REF TO if_sender_bcs,
+          lo_recipient      TYPE REF TO if_recipient_bcs,
+          bcs_exception     TYPE REF TO cx_bcs,
+
+          lr_userid         TYPE RANGE OF ztb_ep_emp_data-userid,
+          ls_submit          TYPE ztb_ep_emp_data,
+          lt_ztb_ep_emp_data TYPE TABLE OF ztb_ep_emp_data,
+          lt_receiver       TYPE TABLE OF lty_receiver,
+          lv_app_url        TYPE string.
+
+    SELECT SINGLE *
+      FROM ztb_ep2_link
+      INTO @DATA(ls_ztb_ep2_link)
+      WHERE sysid  = @sy-sysid
+        AND client = @sy-mandt.
+    IF is_exp IS INITIAL.
+      APPEND INITIAL LINE TO et_return ASSIGNING FIELD-SYMBOL(<lf_s_return>).
+      <lf_s_return>-type        = 'E'.
+      <lf_s_return>-message     = |Explaination data required|.
+      RETURN.
+    ENDIF.
+
+    IF it_exp_chk IS INITIAL.
+      APPEND INITIAL LINE TO et_return ASSIGNING <lf_s_return>.
+      <lf_s_return>-type        = 'E'.
+      <lf_s_return>-message     = |Explaination Checker/Approver requried|.
+      RETURN.
+    ENDIF.
+
+
+*    SELECT SINGLE *
+*      FROM ztb_ep_emp_data
+*      INTO @DATA(ls_submit)
+*      WHERE userid      EQ @is_exp-submitby
+*        AND unit        EQ @is_exp-subunit
+*        AND dept_id     EQ @is_exp-subdept_id
+*        AND position_id EQ @is_exp-subposition_id
+*        AND division    EQ @is_exp-subdivision
+*        AND emp_job     EQ @is_exp-subemp_job.
+*
+*    SELECT *
+*      FROM ztb_ep_emp_data
+*      INTO TABLE @DATA(lt_ztb_ep_emp_data)
+*      FOR ALL ENTRIES IN @it_exp_chk
+*      WHERE userid      EQ @it_exp_chk-userid
+*        AND unit        EQ @it_exp_chk-unit
+*        AND dept_id     EQ @it_exp_chk-dept_id
+*        AND position_id EQ @it_exp_chk-position_id
+*        AND division    EQ @it_exp_chk-division
+*        AND emp_job     EQ @it_exp_chk-emp_job
+*      .
+       CALL FUNCTION 'ZFM_EP2_GET_EMP_DATA'
+      TABLES
+        et_data  = lt_ztb_ep_emp_data.
+
+       READ TABLE lt_ztb_ep_emp_data INTO ls_submit BINARY SEARCH WITH KEY
+        userid      = is_exp-submitby
+        unit        = is_exp-subunit
+        dept_id     = is_exp-subdept_id
+        position_id = is_exp-subposition_id
+        division    = is_exp-subdivision
+        emp_job     = is_exp-subemp_job.
+
+    CASE is_exp-status.
+*--------------------------------------------------------------------*
+        "Pending
+*--------------------------------------------------------------------*
+      WHEN zif_ep2_common~gc_status_pending.
+        lv_app_url = |{ ls_ztb_ep2_link-url }#ZEP2PR701CHK-approve&/EXP_HEADERSet/|.
+
+        "Send to checker
+        LOOP AT it_exp_chk INTO DATA(ls_chk)
+          WHERE type    = zif_ep2_common~gc_chk_type_checker
+            AND status  = zif_ep2_common~gc_status_pending.
+          READ TABLE lt_ztb_ep_emp_data INTO DATA(ls_ztb_ep_emp_data) WITH KEY
+            userid      = ls_chk-userid
+            unit        = ls_chk-unit
+            dept_id     = ls_chk-dept_id
+            position_id = ls_chk-position_id
+            division    = ls_chk-division
+            emp_job     = ls_chk-emp_job.
+          EXIT.
+        ENDLOOP.
+        IF ls_chk IS INITIAL.
+          APPEND INITIAL LINE TO et_return ASSIGNING <lf_s_return>.
+          <lf_s_return>-type        = 'E'.
+          <lf_s_return>-message     = |Cannot found pending checker of Explaination { is_exp-exprqid }|.
+          <lf_s_return>-message_v1  = is_exp-exprqid.
+          RETURN.
+        ENDIF.
+
+        lv_subject = |Explaination approval ({ is_exp-exprqid }) - notification|.
+        lt_html_body_head = VALUE #(
+          ( |Dear { ls_ztb_ep_emp_data-lname } { ls_ztb_ep_emp_data-fname }-san,| )
+          ( |</br>The submitted Explaination Request (<a href="{ lv_app_url }{ is_exp-exprqid }" target="_blank">{ is_exp-exprqid
+            }</a>) on { is_exp-submiton DATE = USER } | )
+          ( | by { is_exp-submitby }-{ ls_submit-lname } { ls_submit-fname
+            }| )
+          ( | need your confirmation.| )
+          ( |</br>Please access E-Order System to check data.| )
+        ).
+
+        APPEND INITIAL LINE TO lt_receiver ASSIGNING FIELD-SYMBOL(<lf_s_receiver>).
+        <lf_s_receiver>-userid = ls_chk-userid.
+        <lf_s_receiver>-email  = ls_ztb_ep_emp_data-email.
+
+*--------------------------------------------------------------------*
+        "Released
+*--------------------------------------------------------------------*
+      WHEN zif_ep2_common~gc_status_released.
+        lv_app_url = |{ ls_ztb_ep2_link-url }#ZEP2PR701CHK-approve&/EXP_HEADERSet/|.
+
+        "Send to checker
+        CLEAR: ls_chk, ls_ztb_ep_emp_data.
+        LOOP AT it_exp_chk INTO ls_chk
+          WHERE type    = zif_ep2_common~gc_chk_type_approver
+            AND status  = zif_ep2_common~gc_status_pending
+            .
+          READ TABLE lt_ztb_ep_emp_data INTO ls_ztb_ep_emp_data WITH KEY
+            userid      = ls_chk-userid
+            unit        = ls_chk-unit
+            dept_id     = ls_chk-dept_id
+            position_id = ls_chk-position_id
+            division    = ls_chk-division
+            emp_job     = ls_chk-emp_job.
+          EXIT.
+        ENDLOOP.
+        IF ls_chk IS INITIAL.
+          APPEND INITIAL LINE TO et_return ASSIGNING <lf_s_return>.
+          <lf_s_return>-type        = 'E'.
+          <lf_s_return>-message     = |Cannot found pending approver of Explaination { is_exp-exprqid }|.
+          <lf_s_return>-message_v1  = is_exp-exprqid.
+          RETURN.
+        ENDIF.
+
+        lv_subject = |Explaination approval ({ is_exp-exprqid }) - released notification|.
+        lt_html_body_head = VALUE #(
+          ( |Dear { ls_ztb_ep_emp_data-lname } { ls_ztb_ep_emp_data-fname }-san,| )
+          ( |</br>The submitted Explaination Request (<a href="{ lv_app_url }{ is_exp-exprqid }" target="_blank">{ is_exp-exprqid
+            }</a>) on { is_exp-submiton DATE = USER } | )
+          ( | by { is_exp-submitby }-{ ls_submit-lname } { ls_submit-fname
+            }| )
+          ( | need your confirmation.| )
+          ( |</br>Please access E-Order System to check data.| )
+        ).
+
+        APPEND INITIAL LINE TO lt_receiver ASSIGNING <lf_s_receiver>.
+        <lf_s_receiver>-userid = ls_chk-userid.
+        <lf_s_receiver>-email  = ls_ztb_ep_emp_data-email.
+
+*--------------------------------------------------------------------*
+        "Returned by checker
+*--------------------------------------------------------------------*
+      WHEN zif_ep2_common~gc_status_returned_checker.
+        lv_app_url = |{ ls_ztb_ep2_link-url }#ZEP2PR701-create&/EXP_HEADERSet/|.
+
+        CLEAR: ls_chk, ls_ztb_ep_emp_data.
+        READ TABLE it_exp_chk INTO ls_chk WITH KEY
+          type    = zif_ep2_common~gc_chk_type_checker
+          status  = zif_ep2_common~gc_status_returned_checker.
+        READ TABLE lt_ztb_ep_emp_data INTO ls_ztb_ep_emp_data WITH KEY
+          userid      = ls_chk-userid
+          unit        = ls_chk-unit
+          dept_id     = ls_chk-dept_id
+          position_id = ls_chk-position_id
+          division    = ls_chk-division
+          emp_job     = ls_chk-emp_job.
+        IF ls_chk IS INITIAL.
+          APPEND INITIAL LINE TO et_return ASSIGNING <lf_s_return>.
+          <lf_s_return>-type        = 'E'.
+          <lf_s_return>-message     = |Cannot found returned checker of Explaination { is_exp-exprqid }|.
+          <lf_s_return>-message_v1  = is_exp-exprqid.
+          RETURN.
+        ENDIF.
+
+        lv_subject = |Explaination approval ({ is_exp-exprqid }) - returned notification|.
+        lt_html_body_head = VALUE #(
+          ( |Dear { ls_submit-lname } { ls_submit-fname }-san,| )
+          ( |</br>The submitted Explaination Request (<a href="{ lv_app_url }{ is_exp-exprqid }" target="_blank">{ is_exp-exprqid
+            }</a>) on { is_exp-submiton DATE = USER } | )
+          ( | has been returned by { ls_ztb_ep_emp_data-userid }-{ ls_ztb_ep_emp_data-lname } { ls_ztb_ep_emp_data-fname }.| )
+          ( |</br>Returned reason: { is_exp-reason }| )
+          ( |</br>Please access E-Order System to check data.| )
+        ).
+
+        "Send to PIC
+        APPEND INITIAL LINE TO lt_receiver ASSIGNING <lf_s_receiver>.
+        <lf_s_receiver>-userid = is_exp-submitby.
+        <lf_s_receiver>-email  = ls_submit-email.
+
+*--------------------------------------------------------------------*
+        "Returned by Approver
+*--------------------------------------------------------------------*
+      WHEN zif_ep2_common~gc_status_returned_approver.
+        lv_app_url = |{ ls_ztb_ep2_link-url }#ZEP2PR701-create&/EXP_HEADERSet/|.
+
+        CLEAR: ls_chk, ls_ztb_ep_emp_data.
+        READ TABLE it_exp_chk INTO ls_chk WITH KEY
+          type    = zif_ep2_common~gc_chk_type_approver
+          status  = zif_ep2_common~gc_status_returned_approver.
+        READ TABLE lt_ztb_ep_emp_data INTO ls_ztb_ep_emp_data WITH KEY
+          userid      = ls_chk-userid
+          unit        = ls_chk-unit
+          dept_id     = ls_chk-dept_id
+          position_id = ls_chk-position_id
+          division    = ls_chk-division
+          emp_job     = ls_chk-emp_job.
+        IF ls_chk IS INITIAL.
+          APPEND INITIAL LINE TO et_return ASSIGNING <lf_s_return>.
+          <lf_s_return>-type        = 'E'.
+          <lf_s_return>-message     = |Cannot found returned approver of Explaination { is_exp-exprqid }|.
+          <lf_s_return>-message_v1  = is_exp-exprqid.
+          RETURN.
+        ENDIF.
+
+        lv_subject = |Explaination approval ({ is_exp-exprqid }) - returned notification|.
+        lt_html_body_head = VALUE #(
+          ( |Dear { ls_submit-lname } { ls_submit-fname }-san,| )
+          ( |</br>The submitted Explaination Request (<a href="{ lv_app_url }{ is_exp-exprqid }" target="_blank">{ is_exp-exprqid
+            }</a>) on { is_exp-submiton DATE = USER } | )
+          ( | has been returned by { ls_ztb_ep_emp_data-userid }-{ ls_ztb_ep_emp_data-lname } { ls_ztb_ep_emp_data-fname }.| )
+          ( |</br>Returned reason: { is_exp-reason }| )
+          ( |</br>Please access E-Order System to check data.| )
+        ).
+
+        "Send to PIC
+        APPEND INITIAL LINE TO lt_receiver ASSIGNING <lf_s_receiver>.
+        <lf_s_receiver>-userid = is_exp-submitby.
+        <lf_s_receiver>-email  = ls_submit-email.
+
+*--------------------------------------------------------------------*
+        "Approved
+*--------------------------------------------------------------------*
+      WHEN zif_ep2_common~gc_status_approved.
+        lv_app_url = |{ ls_ztb_ep2_link-url }#ZEP2PR701-create&/EXP_HEADERSet/|.
+
+        CLEAR: ls_chk, ls_ztb_ep_emp_data.
+        READ TABLE it_exp_chk INTO ls_chk WITH KEY
+          type    = zif_ep2_common~gc_chk_type_approver
+          status  = zif_ep2_common~gc_status_approved.
+        READ TABLE lt_ztb_ep_emp_data INTO ls_ztb_ep_emp_data WITH KEY
+          userid      = ls_chk-userid
+          unit        = ls_chk-unit
+          dept_id     = ls_chk-dept_id
+          position_id = ls_chk-position_id
+          division    = ls_chk-division
+          emp_job     = ls_chk-emp_job.
+        IF ls_chk IS INITIAL.
+          APPEND INITIAL LINE TO et_return ASSIGNING <lf_s_return>.
+          <lf_s_return>-type        = 'E'.
+          <lf_s_return>-message     = |Cannot found approved approver of EMOA { is_exp-exprqid }|.
+          <lf_s_return>-message_v1  = is_exp-exprqid.
+          RETURN.
+        ENDIF.
+
+        lv_subject = |Explaination approval ({ is_exp-exprqid }) - approved notification|.
+        lt_html_body_head = VALUE #(
+          ( |Dear { ls_submit-lname } { ls_submit-fname }-san,| )
+          ( |</br>The submitted Explaination Request (<a href="{ lv_app_url }{ is_exp-exprqid }" target="_blank">{ is_exp-exprqid
+            }</a>) on { is_exp-submiton DATE = USER } | )
+          ( | has been approved by { ls_ztb_ep_emp_data-userid }-{ ls_ztb_ep_emp_data-lname } { ls_ztb_ep_emp_data-fname }.| )
+          ( |</br>Please access E-Order System to check data.| )
+        ).
+
+        "Send to PIC
+        APPEND INITIAL LINE TO lt_receiver ASSIGNING <lf_s_receiver>.
+        <lf_s_receiver>-userid = is_exp-submitby.
+        <lf_s_receiver>-email  = ls_submit-email.
+
+*--------------------------------------------------------------------*
+        "Rejected
+*--------------------------------------------------------------------*
+      WHEN zif_ep2_common~gc_status_rejected.
+        lv_app_url = |{ ls_ztb_ep2_link-url }#ZEP2PR701-create&/EXP_HEADERSet/|.
+
+        CLEAR: ls_chk, ls_ztb_ep_emp_data.
+        READ TABLE it_exp_chk INTO ls_chk WITH KEY
+          type    = zif_ep2_common~gc_chk_type_approver
+          status  = zif_ep2_common~gc_status_rejected.
+        READ TABLE lt_ztb_ep_emp_data INTO ls_ztb_ep_emp_data WITH KEY
+          userid      = ls_chk-userid
+          unit        = ls_chk-unit
+          dept_id     = ls_chk-dept_id
+          position_id = ls_chk-position_id
+          division    = ls_chk-division
+          emp_job     = ls_chk-emp_job.
+        IF ls_chk IS INITIAL.
+          APPEND INITIAL LINE TO et_return ASSIGNING <lf_s_return>.
+          <lf_s_return>-type        = 'E'.
+          <lf_s_return>-message     = |Cannot found rejected approver of EMOA { is_exp-exprqid }|.
+          <lf_s_return>-message_v1  = is_exp-exprqid.
+          RETURN.
+        ENDIF.
+
+        lv_subject = |Explaination approval ({ is_exp-exprqid }) - rejected notification|.
+        lt_html_body_head = VALUE #(
+          ( |Dear { ls_submit-lname } { ls_submit-fname }-san,| )
+          ( |</br>The submitted Explaination Request (<a href="{ lv_app_url }{ is_exp-exprqid }" target="_blank">{ is_exp-exprqid
+            }</a>) on { is_exp-submiton DATE = USER } | )
+          ( | has been rejected by { ls_ztb_ep_emp_data-userid }-{ ls_ztb_ep_emp_data-lname } { ls_ztb_ep_emp_data-fname }.| )
+          ( |</br>Rejected reason: { is_exp-reason }| )
+          ( |</br>Please access E-Order System to check data.| )
+        ).
+
+        "Send to PIC
+        APPEND INITIAL LINE TO lt_receiver ASSIGNING <lf_s_receiver>.
+        <lf_s_receiver>-userid = is_exp-submitby.
+        <lf_s_receiver>-email  = ls_submit-email.
+
+*--------------------------------------------------------------------*
+        "Open | Others
+*--------------------------------------------------------------------*
+      WHEN OTHERS.
+        "Donot send notify
+        RETURN.
+    ENDCASE.
+
+    lt_html_head = VALUE #(
+      ( |<html>| )
+      ( |<head>| )
+      ( | <meta http-equiv="Content-Type" content="text/html; charset=utf-8"/>| )
+      ( |   <style type="text/css">| )
+      ( |     *\{  font-family: Arial, Helvetica, sans-serif;| )
+      ( |             color:#015229; font-size:12pt;\}| )
+*    ( |          table, th, td \{| )
+*    ( |             border: 1px solid black;| )
+*    ( |             border-collapse: collapse; padding: 5px;\}| )
+      ( |   </style>| )
+      ( |</head>| )
+      ( |<body>| ) ).
+
+    lt_html_foot = VALUE #(
+      ( |</br>| )
+      ( |</br>Thank you and best regards!| )
+      ( |</br>| )
+      ( |</br><i>Please do not reply to this email. This mailbox is not monitored and you will not receive a response.</i>| )
+      ( |</br><i>Please contact IT support for further assistance.</i>| )
+      ( |</body>| )
+      ( |</html>| ) ).
+
+    lt_html_body_foot = VALUE #( ( |</table>| ) ).
+
+    APPEND LINES OF lt_html_head TO lt_html.
+    APPEND LINES OF lt_html_body_head TO lt_html.
+*  APPEND LINES OF lt_html_body_main TO lt_html.
+*  APPEND LINES OF lt_html_body_foot TO lt_html.
+    APPEND LINES OF lt_html_foot TO lt_html.
+
+    TRY.
+*     Create Document
+        FREE lo_document.
+        lo_document = cl_document_bcs=>create_document(
+          i_type    = 'HTM'
+          i_text    = lt_html
+          i_subject = lv_subject ).
+
+*     Create persistent send request
+        FREE lo_send_request.
+        lo_send_request = cl_bcs=>create_persistent( ).
+
+*     Add document to send request
+        lo_send_request->set_document( lo_document ).
+
+
+*     Set Sender
+        FREE lo_sender.
+        lo_sender = cl_sapuser_bcs=>create( 'WF-BATCH' ).
+*        lo_sender = cl_sapuser_bcs=>create( ls_submit-userid ).
+*      lo_sender = cl_sapuser_bcs=>create( 'FVLDEV' ).
+        lo_send_request->set_sender( lo_sender ).
+
+*     Set Reipient
+        LOOP AT lt_receiver ASSIGNING <lf_s_receiver>.
+          FREE lo_recipient.
+          IF <lf_s_receiver>-email IS INITIAL.
+            lo_recipient = cl_sapuser_bcs=>create( <lf_s_receiver>-userid ).
+          ELSE.
+            lo_recipient = cl_cam_address_bcs=>create_internet_address( <lf_s_receiver>-email ).
+          ENDIF.
+          lo_send_request->add_recipient(
+            i_recipient = lo_recipient
+            i_express   = abap_true
+          ).
+        ENDLOOP.
+
+        lo_send_request->set_send_immediately( abap_true ).
+        lo_send_request->send( i_with_error_screen = abap_true ).
+
+*      COMMIT WORK AND WAIT.
+      CATCH cx_bcs INTO bcs_exception.
+        IF ls_chk IS INITIAL.
+          APPEND INITIAL LINE TO et_return ASSIGNING <lf_s_return>.
+          <lf_s_return>-type        = 'E'.
+          <lf_s_return>-message     = |Cannot send notification for Explaination { is_exp-exprqid }|.
+          <lf_s_return>-message_v1  = is_exp-exprqid.
+          RETURN.
+        ENDIF.
+    ENDTRY.
+
+
+  ENDMETHOD.
