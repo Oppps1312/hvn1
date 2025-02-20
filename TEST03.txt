@@ -1,0 +1,329 @@
+*&---------------------------------------------------------------------*
+*& Report ZPG_FI_TEST02
+*&---------------------------------------------------------------------*
+*&
+*&---------------------------------------------------------------------*
+REPORT zpg_fi_test02.
+TYPE-POOLS: truxs.
+
+TYPES: BEGIN OF tp_itab,
+         bukrs    TYPE bkpf-bukrs,
+         belnr    TYPE bkpf-belnr,
+         gjahr    TYPE bkpf-gjahr,
+         filename TYPE string,
+       END OF tp_itab,
+
+       BEGIN OF tp_split,
+         data(150),
+       END OF tp_split.
+
+
+DATA: gt_itab  TYPE STANDARD TABLE OF tp_itab,
+      gs_itab  TYPE tp_itab,
+      gt_split TYPE STANDARD TABLE OF tp_split,
+      gs_split TYPE tp_split.
+
+DATA: it_raw TYPE truxs_t_text_data.
+
+"for GOS
+DATA: g_folderid TYPE soodk.
+
+DATA : gv_filename(200),
+       gv_ext(4),
+       gv_cfile TYPE pcfile-path.
+
+*2. Insert the object
+DATA: g_docdata LIKE sodocchgi1.
+
+DATA: g_extension TYPE soodk-objtp.
+
+DATA: git_objhdr  TYPE TABLE OF solisti1 WITH HEADER LINE,
+      git_objcont TYPE TABLE OF solisti1 WITH HEADER LINE,
+      git_hexcont TYPE TABLE OF solix WITH HEADER LINE,
+      g_docinfo   TYPE sofolenti1.
+
+DATA: g_bizojb     TYPE borident,
+      g_attachment TYPE borident.
+
+SELECTION-SCREEN BEGIN OF BLOCK b1 WITH FRAME TITLE TEXT-001.
+  PARAMETERS: p_file TYPE  rlgrap-filename.
+  PARAMETERS: p_head TYPE char01 DEFAULT 'X'.
+SELECTION-SCREEN END OF BLOCK b1.
+
+* At selection screen
+
+AT SELECTION-SCREEN ON VALUE-REQUEST FOR p_file.
+  CALL FUNCTION 'F4_FILENAME'
+    EXPORTING
+      field_name = 'P_FILE'
+    IMPORTING
+      file_name  = p_file.
+
+START-OF-SELECTION.
+  PERFORM excel_to_itab.
+  PERFORM create_gos.
+
+END-OF-SELECTION.
+
+
+*&---------------------------------------------------------------------*
+*& Form excel_to_itab
+*&---------------------------------------------------------------------*
+*& text
+*&---------------------------------------------------------------------*
+*& -->  p1        text
+*& <--  p2        text
+*&---------------------------------------------------------------------*
+FORM excel_to_itab.
+
+  " Convert Excel Data to SAP internal Table Data
+  CALL FUNCTION 'TEXT_CONVERT_XLS_TO_SAP'
+    EXPORTING
+*     I_FIELD_SEPERATOR    =
+      i_line_header        = p_head
+      i_tab_raw_data       = it_raw       " WORK TABLE
+      i_filename           = p_file
+    TABLES
+      i_tab_converted_data = gt_itab[]  "ACTUAL DATA
+    EXCEPTIONS
+      conversion_failed    = 1
+      OTHERS               = 2.
+
+  IF sy-subrc <> 0.
+    MESSAGE ID sy-msgid TYPE sy-msgty NUMBER sy-msgno
+            WITH sy-msgv1 sy-msgv2 sy-msgv3 sy-msgv4.
+  ENDIF.
+
+  DELETE gt_itab WHERE bukrs IS INITIAL OR
+                       belnr IS INITIAL OR
+                       gjahr IS INITIAL OR
+                       filename IS INITIAL.
+
+
+  IF gt_itab[] IS INITIAL.
+    MESSAGE 'Kindly upload the excel file with valid data' TYPE 'I'.
+    LEAVE PROGRAM.
+  ENDIF.
+
+
+ENDFORM.
+*&---------------------------------------------------------------------*
+*& Form create_gos
+*&---------------------------------------------------------------------*
+*& text
+*&---------------------------------------------------------------------*
+*& -->  p1        text
+*& <--  p2        text
+*&---------------------------------------------------------------------*
+FORM create_gos.
+
+
+  LOOP AT gt_itab INTO gs_itab.
+
+    "convert belnr to internal format
+    CALL FUNCTION 'CONVERSION_EXIT_ALPHA_INPUT'
+      EXPORTING
+        input  = gs_itab-belnr
+      IMPORTING
+        output = gs_itab-belnr.
+
+
+    "document number validation
+    SELECT SINGLE * FROM bkpf INTO @DATA(gs_bkpf) WHERE bukrs = @gs_itab-bukrs
+                                                    AND belnr = @gs_itab-belnr
+                                                    AND gjahr = @gs_itab-gjahr.
+    IF gs_bkpf-belnr IS INITIAL.
+      WRITE:/5 gs_itab-bukrs, 20 gs_itab-belnr, 35 gs_itab-gjahr, 50 gv_filename, 100 'Document does not exit' COLOR 6.
+      CONTINUE.  "process next record
+    ELSE.
+      CLEAR : gs_bkpf.
+    ENDIF.
+
+
+*1. Get the folder id
+    CLEAR : g_folderid.
+
+    CALL FUNCTION 'SO_FOLDER_ROOT_ID_GET'
+      EXPORTING
+*       OWNER                 = ' '
+        region                = 'B'
+      IMPORTING
+        folder_id             = g_folderid
+      EXCEPTIONS
+        communication_failure = 1
+        owner_not_exist       = 2
+        system_failure        = 3
+        x_error               = 4
+        OTHERS                = 5.
+    IF sy-subrc <> 0.
+* MESSAGE ID SY-MSGID TYPE SY-MSGTY NUMBER SY-MSGNO
+*         WITH SY-MSGV1 SY-MSGV2 SY-MSGV3 SY-MSGV4.
+    ENDIF.
+
+    CLEAR : gv_ext, gv_filename, gt_split[], gs_split.
+
+    SPLIT gs_itab-filename AT '\' INTO TABLE gt_split[].
+
+    DESCRIBE TABLE gt_split LINES DATA(gv_lines).
+
+    IF gv_lines IS NOT INITIAL.
+      gs_split = gt_split[ gv_lines ].
+    ELSE.
+      CONTINUE.
+    ENDIF.
+
+    SPLIT gs_split-data AT '.' INTO gv_filename gv_ext.
+    gv_filename = gs_split-data.
+
+    "splt filename  PC_SPLIT_COMPLETE_FILENAME
+*           gv_cfile = gs_itab-filename.
+*
+*    CALL FUNCTION 'PC_SPLIT_COMPLETE_FILENAME'
+*      EXPORTING
+*        complete_filename       = gv_cfile
+**       CHECK_DOS_FORMAT        =
+*     IMPORTING
+**       DRIVE                   =
+*       EXTENSION               = gv_ext
+**       NAME                    =
+*       NAME_WITH_EXT           = gv_filename
+**       PATH                    =
+*     EXCEPTIONS
+*       INVALID_DRIVE           = 1
+*       INVALID_EXTENSION       = 2
+*       INVALID_NAME            = 3
+*       INVALID_PATH            = 4
+*       OTHERS                  = 5
+*              .
+*    IF sy-subrc <> 0.
+** Implement suitable error handling here
+*    ENDIF.
+
+    CLEAR : git_hexcont[].
+
+    CALL FUNCTION 'GUI_UPLOAD'
+      EXPORTING
+        filename                = gs_itab-filename
+        filetype                = 'BIN'
+*       HAS_FIELD_SEPARATOR     = ' '
+*       HEADER_LENGTH           = 0
+*       READ_BY_LINE            = 'X'
+*       DAT_MODE                = ' '
+*       CODEPAGE                = ' '
+*       IGNORE_CERR             = ABAP_TRUE
+*       REPLACEMENT             = '#'
+*       CHECK_BOM               = ' '
+*       VIRUS_SCAN_PROFILE      =
+*       NO_AUTH_CHECK           = ' '
+*   IMPORTING
+*       FILELENGTH              =
+*       HEADER                  =
+      TABLES
+        data_tab                = git_hexcont
+      EXCEPTIONS
+        file_open_error         = 1
+        file_read_error         = 2
+        no_batch                = 3
+        gui_refuse_filetransfer = 4
+        invalid_type            = 5
+        no_authority            = 6
+        unknown_error           = 7
+        bad_data_format         = 8
+        header_not_allowed      = 9
+        separator_not_allowed   = 10
+        header_too_long         = 11
+        unknown_dp_error        = 12
+        access_denied           = 13
+        dp_out_of_memory        = 14
+        disk_full               = 15
+        dp_timeout              = 16
+        OTHERS                  = 17.
+    IF sy-subrc <> 0.
+* MESSAGE ID SY-MSGID TYPE SY-MSGTY NUMBER SY-MSGNO
+*         WITH SY-MSGV1 SY-MSGV2 SY-MSGV3 SY-MSGV4.
+    ENDIF.
+
+    CLEAR : git_objhdr[].
+
+    g_docdata-obj_name  = 'MESSAGE'.
+    g_docdata-obj_descr = gv_filename.
+    g_docdata-obj_langu = 'EN'.
+
+    CONCATENATE '&SO_FILENAME=' gv_filename INTO git_objhdr-line.
+    APPEND git_objhdr.
+    git_objhdr-line = '&SO_FORMAT=BIN'.
+    APPEND git_objhdr.
+
+    g_extension = gv_ext.
+
+    CALL FUNCTION 'SO_DOCUMENT_INSERT_API1'
+      EXPORTING
+        folder_id                  = g_folderid
+        document_data              = g_docdata
+        document_type              = g_extension
+      IMPORTING
+        document_info              = g_docinfo
+      TABLES
+        object_header              = git_objhdr
+*       object_content             = git_objcont
+        contents_hex               = git_hexcont
+*       OBJECT_PARA                =
+*       OBJECT_PARB                =
+      EXCEPTIONS
+        folder_not_exist           = 1
+        document_type_not_exist    = 2
+        operation_no_authorization = 3
+        parameter_error            = 4
+        x_error                    = 5
+        enqueue_error              = 6
+        OTHERS                     = 7.
+    IF sy-subrc <> 0.
+      WRITE:/ 'SO_DOCUMENT_INSERT_API1 SY-SUBRC = ', sy-subrc.
+    ENDIF.
+
+    CLEAR : g_bizojb, g_attachment.
+    DATA(lv_invno_gjahr) = gs_itab-belnr && gs_itab-gjahr.
+    CONCATENATE gs_itab-bukrs lv_invno_gjahr INTO g_bizojb-objkey SEPARATED BY space.
+*    CONCATENATE gs_itab-bukrs
+*                gs_itab-belnr
+*                gs_itab-gjahr INTO g_bizojb-objkey.
+    g_bizojb-objtype = 'BKPF'.
+
+*Attachment folder id is in g_docinfo
+    g_attachment-objkey  = g_docinfo-doc_id.
+    g_attachment-objtype = 'MESSAGE'.
+
+    CALL FUNCTION 'BINARY_RELATION_CREATE'
+      EXPORTING
+        obj_rolea      = g_bizojb
+        obj_roleb      = g_attachment
+        relationtype   = 'ATTA'
+*       FIRE_EVENTS    = 'X'
+* IMPORTING
+*       BINREL         =
+* TABLES
+*       BINREL_ATTRIB  =
+      EXCEPTIONS
+        no_model       = 1
+        internal_error = 2
+        unknown        = 3
+        OTHERS         = 4.
+    IF sy-subrc <> 0.
+* MESSAGE ID SY-MSGID TYPE SY-MSGTY NUMBER SY-MSGNO
+*         WITH SY-MSGV1 SY-MSGV2 SY-MSGV3 SY-MSGV4.
+
+
+      WRITE:/5 gs_itab-bukrs, 20 gs_itab-belnr, 35 gs_itab-gjahr, 50 gv_filename, 100 'Error in document attachment' COLOR 6.
+
+    ELSE.
+      "
+      WRITE:/5 gs_itab-bukrs, 20 gs_itab-belnr, 35 gs_itab-gjahr, 50 gv_filename, 100 'Success' COLOR 5.
+
+    ENDIF.
+
+    COMMIT WORK.
+
+    CLEAR : gs_itab.
+  ENDLOOP.
+
+ENDFORM.
