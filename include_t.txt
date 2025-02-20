@@ -1,0 +1,70 @@
+*&---------------------------------------------------------------------*
+*& Include          ZPG_FI_INVFILEUPLOAD_TOP
+*&---------------------------------------------------------------------*
+REPORT zpg_fi_invfileupload.
+CLASS gcl_event_receiver DEFINITION DEFERRED.
+
+*----------------------------------------------------------------------*
+* T A B  L E S
+*----------------------------------------------------------------------*
+TABLES: sscrfields.
+*----------------------------------------------------------------------*
+* T Y P E S
+*----------------------------------------------------------------------*
+TYPES:
+  BEGIN OF ty_input,
+    invoice_no TYPE string,
+    bukrs      TYPE string,
+    gjahr      TYPE string,
+    url        TYPE string,
+
+  END OF ty_input,
+  BEGIN OF ty_data,
+    status     TYPE icon_d,
+    row_index  TYPE i,
+    invoice_no TYPE bkpf-belnr,
+    bukrs      TYPE bkpf-bukrs,
+    gjahr      TYPE bkpf-gjahr,
+    url        TYPE string,
+    message    TYPE string,
+  END OF ty_data,
+  BEGIN OF ty_parameter,
+    path TYPE string,
+  END OF ty_parameter,
+  BEGIN OF ty_attachment,
+    att_type type swo_objtyp,
+    att_object type swo_typeid,
+    att_path type localfile,
+    att_tittle type so_obj_des,
+  END OF ty_attachment
+  .
+*----------------------------------------------------------------------*
+* D A T A
+*----------------------------------------------------------------------*
+DATA:
+  gs_parameter TYPE ty_parameter,
+  gt_input     TYPE TABLE OF ty_input,
+  gt_data      TYPE TABLE OF ty_data,
+  go_salv      TYPE REF TO cl_salv_table.
+DATA: gt_attachment TYPE TABLE OF ty_attachment.
+*----------------------------------------------------------------------*
+* C O N S T A N T S
+*----------------------------------------------------------------------*
+CONSTANTS:
+
+  gc_file_temp       TYPE tadir-obj_name VALUE 'ZMM03_TEMP_UPLOAD_FI',
+  gc_status_error    TYPE icon_d VALUE icon_red_light,
+  gc_status_nomal    TYPE icon_d VALUE icon_light_out,
+  gc_status_success  TYPE icon_d VALUE icon_green_light.
+*----------------------------------------------------------------------*
+* S E L E C T I O N - S C R E E N
+*----------------------------------------------------------------------*
+SELECTION-SCREEN FUNCTION KEY 1.
+SELECTION-SCREEN BEGIN OF BLOCK BL01 WITH FRAME TITLE TEXT-001.
+  PARAMETERS: p_path LIKE gs_parameter-path MODIF ID GR1 .
+SELECTION-SCREEN END OF BLOCK BL01.
+SELECTION-SCREEN BEGIN OF BLOCK BL02 WITH FRAME TITLE TEXT-002.
+SELECTION-SCREEN BEGIN OF LINE.
+  SELECTION-SCREEN COMMENT 01(79) TEXT-t01.
+SELECTION-SCREEN END OF LINE.
+SELECTION-SCREEN END OF BLOCK BL02.

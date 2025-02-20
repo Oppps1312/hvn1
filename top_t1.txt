@@ -1,0 +1,57 @@
+*&---------------------------------------------------------------------*
+*& Report ZPG_FI_INVFILEUPLOAD
+*&---------------------------------------------------------------------*
+*********************************************************************
+* COPYRIGHT BY VINGROUP
+* FUNCTIONAL DESCRIPTION
+* ======================
+*  Description   : Upload attachment of Fi document
+*--------------------------------------------------------------------
+* ORIGINAL AUTHOR: lungtv1
+* DATE WRITTEN   : 17.02.2025
+* Object Ref     :
+*
+*--------------------------------------------------------------------
+* STATUS         :
+* FREQUENCY      :
+*--------------------------------------------------------------------
+* AMENDMENT HISTORY
+* =================
+*  VER    DATE         AUTHOR        REQUESTOR    REMARK
+* -----  ----------   ------------  ------------  ---------------
+* V0.1  17.02.2025     lungtv1                      Create
+*********************************************************************
+*REPORT ZPG_FI_INVFILEUPLOAD.
+INCLUDE ZPG_FI_INVFILEUPLOAD_TOP. "Global data
+INCLUDE ZPG_FI_INVFILEUPLOAD_F01. "Form-routines
+*---------------------------------------------------------------------*
+*       I N I T I A L I Z A T I O N
+*---------------------------------------------------------------------*
+INITIALIZATION.
+PERFORM initialization.
+*---------------------------------------------------------------------*
+*       S E L E C T I O N -  S C R E E N
+*---------------------------------------------------------------------*
+AT SELECTION-SCREEN.
+*Set funtion when click an button on screen
+CASE sscrfields-ucomm.
+  WHEN 'FC01'.
+    PERFORM download_temp USING gc_file_temp.
+  WHEN space.
+ENDCASE.
+
+*---------------------------------------------------------------------*
+*       S E A R C H   H E L P                                         *
+*---------------------------------------------------------------------*
+AT SELECTION-SCREEN ON VALUE-REQUEST FOR p_path.
+*get path of file
+PERFORM get_path.
+
+*---------------------------------------------------------------------*
+*       S T A R T - O F - S E L E C T I O N
+*---------------------------------------------------------------------*
+START-OF-SELECTION.
+PERFORM get_parameter. " Check if file path is empty
+PERFORM get_data. " Get data from file
+PERFORM process_data. " Convert data
+PERFORM display_data. " Display Data to ALV
